@@ -1,0 +1,8 @@
+version: v1
+name: buf.build/ccc/grpc-graphql-gateway
+  lint:
+    use:
+      - DEFAULT
+  breaking:
+    use:
+      - FILE
