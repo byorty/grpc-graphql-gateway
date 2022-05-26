@@ -25,10 +25,11 @@ var supportedPtypesLaterV3_14_0 = []string{
 }
 
 func getSupportedPtypeNames(cv *plugin.Version) []string {
-	if cv.GetMajor() >= 3 && cv.GetMinor() >= 14 {
-		return supportedPtypesLaterV3_14_0
-	}
-	return supportedPtypes
+	//log.Print(cv)
+	//if cv.GetMajor() >= 3 && cv.GetMinor() >= 14 {
+	return supportedPtypesLaterV3_14_0
+	//}
+	//return supportedPtypes
 }
 
 func getImplementedPtypes(m *Message) (string, error) {
@@ -41,7 +42,7 @@ func getImplementedPtypes(m *Message) (string, error) {
 		}
 	}
 	if !found {
-		return "", fmt.Errorf("google's ptype \"%s\" does not implement for now.", ptype)
+		return "", fmt.Errorf("google's ptype \"%s\" does not implement for now!!!", ptype)
 	}
 
 	return ptype, nil

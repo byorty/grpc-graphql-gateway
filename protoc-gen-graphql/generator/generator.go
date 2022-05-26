@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"go/format"
 	"io/ioutil"
@@ -38,6 +39,7 @@ type Generator struct {
 	messages map[string]*spec.Message
 	enums    map[string]*spec.Enum
 	logger   *Logger
+	fileMap  map[string]*spec.File
 }
 
 func New(files []*spec.File, args *spec.Params) *Generator {
@@ -59,7 +61,8 @@ func New(files []*spec.File, args *spec.Params) *Generator {
 	}
 
 	return &Generator{
-		files:    files,
+		files: files,
+		//fileMap: fileMap,
 		args:     args,
 		messages: messages,
 		enums:    enums,
@@ -68,34 +71,36 @@ func New(files []*spec.File, args *spec.Params) *Generator {
 }
 
 func (g *Generator) Generate(tmpl string, fs []string) ([]*plugin.CodeGeneratorResponse_File, error) {
-	services, err := g.analyzeServices()
-	if err != nil {
-		return nil, err
-	}
-
 	var outFiles []*plugin.CodeGeneratorResponse_File
-	for _, f := range g.files {
+	for _, file := range g.files {
 		for _, v := range fs {
-			if f.Filename() != v {
-				continue
-			}
-
-			s, ok := services[f.Package()]
-			if !ok {
+			if file.Filename() != v {
 				continue
 			}
 
 			// mark as same package definition in file
-			g.analyzeEnum(f)
-			if err := g.analyzeMessage(f); err != nil {
+			g.analyzeEnum(file)
+			if err := g.analyzeMessage(file); err != nil {
 				return nil, err
 			}
 
-			file, err := g.generateFile(f, tmpl, s)
+			services := file.Services()
+			//if len(services) == 0 {
+			//	g.generateMessages(file, tmpl)
+			//}
+
+			for _, service := range services {
+				err := g.analyzeService(file, service)
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			outFile, err := g.generateFile(file, tmpl, file.Services())
 			if err != nil {
 				return nil, err
 			}
-			outFiles = append(outFiles, file)
+			outFiles = append(outFiles, outFile)
 		}
 	}
 	return outFiles, nil
@@ -118,7 +123,7 @@ func (g *Generator) generateFile(file *spec.File, tmpl string, services []*spec.
 		}
 		if m.IsDepended(spec.DependTypeMessage, file.Package()) {
 			switch {
-			case file.Package() == m.Package():
+			case file.Filename() == m.Filename():
 				types = append(types, m)
 			case spec.IsGooglePackage(m):
 				packages = append(packages, spec.NewGooglePackage(m))
@@ -126,7 +131,7 @@ func (g *Generator) generateFile(file *spec.File, tmpl string, services []*spec.
 				packages = append(packages, spec.NewPackage(m))
 			}
 		}
-		if m.IsDepended(spec.DependTypeInput, file.Package()) {
+		if m.IsDepended(spec.DependTypeInput, file.Package()) && m.Filename() == file.Filename() {
 			if !spec.IsGooglePackage(m) {
 				inputs = append(inputs, m)
 			}
@@ -179,7 +184,7 @@ func (g *Generator) generateFile(file *spec.File, tmpl string, services []*spec.
 			continue
 		}
 		if e.IsDepended(spec.DependTypeEnum, file.Package()) {
-			if file.Package() == e.Package() || spec.IsGooglePackage(e) {
+			if file.Filename() == e.Filename() {
 				enums = append(enums, e)
 			} else {
 				packages = append(packages, spec.NewPackage(e))
@@ -194,6 +199,11 @@ func (g *Generator) generateFile(file *spec.File, tmpl string, services []*spec.
 		if _, ok := stack[p.Path]; ok {
 			continue
 		}
+
+		if p.Path == file.GoPackage() {
+			continue
+		}
+
 		uniquePackages = append(uniquePackages, p)
 		stack[p.Path] = struct{}{}
 	}
@@ -245,7 +255,8 @@ func (g *Generator) generateFile(file *spec.File, tmpl string, services []*spec.
 	// If paths=source_relative option is provided, put generated file relatively
 	if g.args.IsSourceRelative() {
 		return &plugin.CodeGeneratorResponse_File{
-			Name:    proto.String(fmt.Sprintf("%s.graphql.go", root.Name)),
+			//Name:    proto.String(fmt.Sprintf("%s.graphql.go", root.Name)),
+			Name:    proto.String(strings.ReplaceAll(file.Filename(), ".proto", ".graphql.go")),
 			Content: proto.String(string(out)),
 		}, nil
 	}
@@ -297,24 +308,6 @@ func (g *Generator) analyzeEnum(file *spec.File) {
 		}
 		e.Depend(spec.DependTypeEnum, file.Package())
 	}
-}
-
-func (g *Generator) analyzeServices() (map[string][]*spec.Service, error) {
-	services := make(map[string][]*spec.Service)
-
-	for _, f := range g.files {
-		services[f.Package()] = []*spec.Service{}
-
-		for _, s := range f.Services() {
-			if err := g.analyzeService(f, s); err != nil {
-				return nil, err
-			}
-			if len(s.Queries) > 0 || len(s.Mutations) > 0 {
-				services[f.Package()] = append(services[f.Package()], s)
-			}
-		}
-	}
-	return services, nil
 }
 
 func (g *Generator) analyzeService(f *spec.File, s *spec.Service) error {
